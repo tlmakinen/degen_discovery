@@ -12,9 +12,7 @@ from tqdm import tqdm
 #import tensorflow_probability.substrates.jax as tfp
 
 import matplotlib.pyplot as plt
-
 from fishnets import *
-
 
 
 # -------------- DEFINE SIMULATOR AND PARAMS --------------
@@ -185,7 +183,7 @@ def training_loop(key, model, w, patience=200):
               patience_counter += 1
 
           if patience_counter > patience:
-              print("patience count exceeded: loss stopped decreasing")
+              print("\n patience count exceeded: loss stopped decreasing \n")
               break
           
 
