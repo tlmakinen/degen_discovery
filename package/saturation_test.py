@@ -309,3 +309,49 @@ for i in range(num_models):
   ax2.set_title(r'$ \frac{1}{2} \ln \det \langle F_{\rm NN}(\theta) \rangle $')
   plt.tight_layout()
   plt.close()
+
+
+
+# EXPORT ENSEMBLE ESTIMATES FOR FISHER
+
+
+key = jr.PRNGKey(10000)
+
+key1,key2 = jr.split(key)
+
+mu_ = jr.uniform(key1, shape=(10000,), minval=MIN_MU, maxval=MAX_MU)
+sigma_ = jr.uniform(key2, shape=(10000,), minval=MIN_VAR, maxval=MAX_VAR)
+
+theta_test = jnp.stack([mu_, sigma_], axis=-1)
+
+keys = jr.split(key, num=10000)
+data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
+
+# calculate network fisher over all the data
+def predicted_fishers(model, w, data):
+
+  ensemble_predictions = []
+
+  def _getf(d):
+      return model.apply(w, d)[1]
+  
+  F_network_out = jax.vmap(_getf)(data)
+  #ensemble_predictions.append(F_network_out)
+
+
+  return F_network_out
+
+
+ensemble_F_predictions = jnp.array([predicted_fishers(models[i], ws[i], data_test) for i in range(num_models)])
+# calculate true fisher at the same theta
+F_true_out = jax.vmap(Fisher)(theta_test)
+
+# save everything
+np.savez("toy_problem_regression_outputs",
+         #data=data_test,
+         theta=theta_test,
+         F_network_ensemble=ensemble_F_predictions,
+         F_true=F_true_out
+         )
+
+# save models
