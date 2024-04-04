@@ -88,7 +88,8 @@ class Fishnet_from_embedding(nn.Module):
     def __call__(self, x):
         priorCinv = jnp.eye(self.n_p)
         outdim = self.n_p + (self.n_p * (self.n_p + 1) // 2)
-        outputs = nn.Dense(outdim)(self.act(x))
+        outputs = self.act(nn.Dense(self.hidden)(x))
+        outputs = nn.Dense(outdim)(x)
 
         t = outputs[:self.n_p] 
         fisher_cholesky = outputs[self.n_p:]

@@ -9,6 +9,8 @@ import math
 from typing import Sequence
 from tqdm import tqdm
 
+from sklearn.preprocessing import MinMaxScaler
+
 #import tensorflow_probability.substrates.jax as tfp
 
 import matplotlib.pyplot as plt
@@ -22,8 +24,32 @@ input_shape = (n_d,)
 MAX_VAR = 10.0
 MIN_VAR = 0.15
 
-MAX_MU = 2.0
-MIN_MU = -2.0
+MAX_MU = 5.0
+MIN_MU = -5.0
+
+xmin = jnp.array([MIN_MU, MIN_VAR])
+xmax = jnp.array([MAX_MU, MAX_VAR])
+scale_theta_to = (0.1, 2.)
+
+
+def minmax(x, 
+           xmin=xmin,
+           xmax=xmax,
+           feature_range=scale_theta_to):
+    minval, maxval = feature_range
+    xstd = (x - xmin) / (xmax - xmin)
+    return xstd * (maxval - minval) + minval
+
+def minmax_inv(x,
+               xmin=xmin,
+               xmax=xmax,
+               feature_range=scale_theta_to):
+               
+    minval, maxval = feature_range
+    x -= minval
+    x /= (maxval - minval)
+    x *= (xmax - xmin)
+    return x + xmin
 
 @jax.jit
 def Fisher(θ, n_d=n_d):
@@ -84,6 +110,14 @@ data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
 
 theta = theta_.copy()
 
+# rescale data for network
+datascale = 10.0
+data /= datascale
+data_test /= datascale
+
+#scaler = MinMaxScaler(feature_range=scale_theta_to)
+#theta = minmax(theta)
+#theta_test = minmax(theta)
 
 # -------------- INITIALISE MODELS --------------
 key = jr.PRNGKey(0)
@@ -115,7 +149,8 @@ batch_size = 100
 epochs = 400
 key = jr.PRNGKey(999)
 
-def training_loop(key, model, w, patience=200):
+def training_loop(key, model, w, data, theta, patience=20,
+                    epochs=epochs, min_epochs=100):
 
     @jax.jit
     def kl_loss(w, x_batched, theta_batched):
@@ -128,8 +163,14 @@ def training_loop(key, model, w, patience=200):
         return -jnp.mean(-0.5 * jnp.einsum('ij,ij->i', (theta_batched - mle), \
                                                 jnp.einsum('ijk,ik->ij', F, (theta_batched - mle))) \
                                                       + 0.5*jnp.log(jnp.linalg.det(F)), axis=0)
+    
+    steps = epochs*(theta.shape[0]//batch_size) + epochs
+    #scheduler = optax.cosine_onecycle_schedule(steps, 
+    #                  peak_value=1e-3, pct_start=0.3, 
+    #                  div_factor=25.0, 
+    #                  final_div_factor=10000.0)
 
-    tx = optax.adam(learning_rate=5e-5)
+    tx = optax.adam(learning_rate=5e-5) # scheduler
     opt_state = tx.init(w)
     loss_grad_fn = jax.value_and_grad(kl_loss)
 
@@ -138,9 +179,12 @@ def training_loop(key, model, w, patience=200):
         x_samples = _data[i]
         y_samples = _theta[i]
 
-        loss_val, grads = loss_grad_fn(w, x_samples, y_samples)
+        loss, grads = loss_grad_fn(w, x_samples, y_samples)
         updates, opt_state = tx.update(grads, opt_state)
         w = optax.apply_updates(w, updates)
+
+        # keep running average
+        loss_val += loss
         
         return w, loss_val, opt_state, _data, _theta
 
@@ -161,17 +205,25 @@ def training_loop(key, model, w, patience=200):
     for j in pbar:
           key,rng = jr.split(key)
 
+          # reset loss value every epoch
+          loss_val = 0.0
+          
           # shuffle data every epoch
-          randidx = jr.shuffle(key, jnp.arange(theta.reshape(-1, 2).shape[0]))
-          _data = data.reshape(-1, 100, 1)[randidx].reshape(batch_size, -1, 100, 1)
+          randidx = jr.permutation(key, jnp.arange(theta.reshape(-1, 2).shape[0]), independent=True)
+          _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d, 1)
           _theta = theta.reshape(-1, 2)[randidx].reshape(batch_size, -1, 2)
 
           inits = (w, loss_val, opt_state, _data, _theta)
 
           w, loss_val, opt_state, _data, _theta = jax.lax.fori_loop(lower, upper, body_fun, inits)
+          loss_val /= _data.shape[0] # average over all batches
 
           losses = losses.at[j].set(loss_val)
           pbar.set_description('epoch %d loss: %.5f'%(j, loss_val))
+
+          # use last 10 epochs as running average
+          #if j+1 > 10:
+          #  loss_val = jnp.mean(losses[j-10:])
 
           counter += 1
 
@@ -182,7 +234,7 @@ def training_loop(key, model, w, patience=200):
           else:
               patience_counter += 1
 
-          if patience_counter > patience:
+          if (patience_counter - min_epochs > patience) and (j + 1 > min_epochs):
               print("\n patience count exceeded: loss stopped decreasing \n")
               break
           
@@ -199,7 +251,7 @@ keys = jr.split(key, num_models)
 
 for i,w in enumerate(ws):
   print("\n training model %d of %d \n"%(i+1, num_models))
-  loss, wtrained = training_loop(keys[i], models[i], w)
+  loss, wtrained = training_loop(keys[i], models[i], w, data, theta)
   all_losses.append(loss)
   ws[i] = wtrained
 
@@ -244,7 +296,8 @@ def predicted_fisher_grid(key, model, w, num_sims_avg=200):
       keys = jr.split(key, num_sims_avg)
 
       sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T)[:, :, jnp.newaxis]
-      
+      sims /= datascale
+
       fpreds = jax.vmap(_getf)(sims)
 
       fishers_pred.append(jnp.mean(fpreds, axis=0))
@@ -326,6 +379,7 @@ theta_test = jnp.stack([mu_, sigma_], axis=-1)
 
 keys = jr.split(key, num=10000)
 data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
+data_test /= datascale
 
 # calculate network fisher over all the data
 def predicted_fishers(model, w, data):

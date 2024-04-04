@@ -25,6 +25,25 @@ from flatten_net import *
 
 Array = Any
 
+def minmax(x, 
+           xmin,
+           xmax,
+           feature_range):
+    minval, maxval = feature_range
+    xstd = (x - xmin) / (xmax - xmin)
+    return xstd * (maxval - minval) + minval
+
+def minmax_inv(x,
+               xmin,
+               xmax,
+               feature_range):
+               
+    minval, maxval = feature_range
+    x -= minval
+    x /= (maxval - minval)
+    x *= (xmax - xmin)
+    return x + xmin
+
 
 # -------------- DEFINE SIMULATOR AND PARAMS --------------
 n_d = 100
@@ -39,30 +58,32 @@ MIN_MU = -2.0
 n_params = 2
 
 
-
-
 key = jr.PRNGKey(42)
 n_outputs = int(n_params + int(n_params * (n_params + 1)) // 2)
-hidden_size = 100
+hidden_size = 50
 
+
+# get scaling from data
+θs = jnp.array(np.load("toy_problem_regression_outputs.npz")["theta"])
+Fs = jnp.mean(jnp.array(np.load("toy_problem_regression_outputs.npz")["F_network_ensemble"]), 0)
+
+
+max_x = θs.max(0)
+min_x = θs.min(0)
 
 # maybe we can have an automatic flag for the flattening network if we don't get
 # to detQ < 1.1 or something that asks the user to deepen or widen their flattening net
 
-model = custom_MLP([n_params,
-                    hidden_size, 
+model = custom_MLP([hidden_size, 
                     hidden_size, 
                     hidden_size,
                     hidden_size,
                     n_params],
-                  max_x = jnp.array([MAX_MU, MAX_VAR]),
-                  min_x = jnp.array([MIN_MU, MIN_VAR]))
-
+                  max_x = max_x, #jnp.array([MAX_MU, MAX_VAR]),
+                  min_x = min_x #jnp.array([MIN_MU, MIN_VAR]))
+)
 
 num = 10000
-
-θs = jnp.array(np.load("toy_problem_regression_outputs.npz")["theta"])
-Fs = jnp.mean(jnp.array(np.load("toy_problem_regression_outputs.npz")["F_network_ensemble"]), 0)
 
 
 # learn η(θ; w) function where η is a neural network
@@ -107,7 +128,6 @@ def info_loss(w, theta_batched, F_batched):
 
 
 
-
 # TRAINING LOOP STUFF
 
 
@@ -118,9 +138,6 @@ w = model.init(key, jnp.ones((n_params,)))
 noise = 0 # 1e-7
 theta_true = θs.reshape(-1, batch_size, n_params)
 F_fishnets = Fs.reshape(-1, batch_size, n_params, n_params)
-
-
-
 
 
 def training_loop(key, w, 
@@ -181,7 +198,7 @@ def training_loop(key, w,
     for j in pbar:
       
       if (counter > patience) and (j + 1 > min_epochs):
-            print("patience reached. stopping training.")
+            print("\n patience reached. stopping training.")
             losses = losses[:j]
             detFetas = detFetas[:j]
             val_losses = val_losses[:j]
@@ -226,7 +243,8 @@ def training_loop(key, w,
 
 # RUN LOOP
 print("TRAINING FLATTENER NET")
-w, all_loss, all_dets = training_loop(jr.PRNGKey(88), w, theta_true, F_fishnets, lr=1e-4)
+key,rng = jr.split(key)
+w, all_loss, all_dets = training_loop(key, w, theta_true, F_fishnets, lr=1e-4)
 
 
 
@@ -280,11 +298,17 @@ def get_δJ(F, δF, Jbar):
     return np.linalg.inv(J + δJ) - Jbar
 
 
+print("CALCULATING JACOBIAN ERROR")
+
 δJs = get_δJ(allFs.mean(0), dFs, Jbar)
+
+print("SAVING EVERYTHING")
 # save all outputs
 np.savez("flattened_coords_sr",
          theta=θs,
          eta=ηs,
          Jacobians=Jbar,
-         deltaJ=δJs
+         deltaJ=δJs,
+         meanF=allFs.mean(0),
+         dFs=dFs
 )
