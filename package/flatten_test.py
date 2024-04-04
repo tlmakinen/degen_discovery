@@ -52,13 +52,13 @@ input_shape = (n_d,)
 MAX_VAR = 10.0
 MIN_VAR = 0.15
 
-MAX_MU = 2.0
-MIN_MU = -2.0
+MAX_MU = 5.0
+MIN_MU = -5.0
 
 n_params = 2
 
 
-key = jr.PRNGKey(42)
+key = jr.PRNGKey(0)
 n_outputs = int(n_params + int(n_params * (n_params + 1)) // 2)
 hidden_size = 50
 
