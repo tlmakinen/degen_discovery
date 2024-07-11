@@ -22,7 +22,7 @@ n_d = 100
 input_shape = (n_d,)
 
 MAX_VAR = 15.0
-MIN_VAR = 0.15
+MIN_VAR = 0.1
 
 MAX_MU = 5.0
 MIN_MU = -5.0
@@ -31,7 +31,7 @@ xmin = jnp.array([MIN_MU, MIN_VAR])
 xmax = jnp.array([MAX_MU, MAX_VAR])
 scale_theta_to = (0.5, 1.5)
 
-SCALE_THETA = True
+SCALE_THETA = False
 
 
 def minmax(x, 
@@ -128,17 +128,28 @@ if SCALE_THETA:
 key = jr.PRNGKey(0)
 
 # initialise several models
-num_models = 3
+num_models = 5
 
 n_hiddens = [
-    [128, 128],
+    [256, 256],
     [128,128,128],
+    [128,128,128],
+    [256,256,256],
     [256,256,256]
 ]
 
+# models = [nn.Sequential([
+#             SetEmbedding(n_hiddens[i], 
+#                           [50,50]),
+#             Fishnet_from_embedding(
+#                           n_p = 2
+                                      
+#             )]
+#         )
+#         for i in range(num_models)]
+
 models = [nn.Sequential([
-            SetEmbedding(n_hiddens[i], 
-                          [50,50]),
+            MLP(n_hiddens[i], act=nn.swish),
             Fishnet_from_embedding(
                           n_p = 2
                                       
@@ -146,15 +157,16 @@ models = [nn.Sequential([
         )
         for i in range(num_models)]
 
+data = jnp.squeeze(data)
 keys = jr.split(key, num=num_models)
 ws = [m.init(keys[i], data[0]) for i,m in enumerate(models)]
 
 
 batch_size = 100
-epochs = 400
+epochs = 4000
 key = jr.PRNGKey(999)
 
-def training_loop(key, model, w, data, theta, patience=20,
+def training_loop(key, model, w, data, theta, patience=100,
                     epochs=epochs, min_epochs=100):
 
     @jax.jit
@@ -185,7 +197,7 @@ def training_loop(key, model, w, data, theta, patience=20,
         y_samples = _theta[i]
 
         loss, grads = loss_grad_fn(w, x_samples, y_samples)
-        updates, opt_state = tx.update(grads, opt_state)
+        updates, opt_state = tx.update(grads, opt_state, w)
         w = optax.apply_updates(w, updates)
 
         # keep running average
@@ -215,7 +227,7 @@ def training_loop(key, model, w, data, theta, patience=20,
           
           # shuffle data every epoch
           randidx = jr.permutation(key, jnp.arange(theta.reshape(-1, 2).shape[0]), independent=True)
-          _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d, 1)
+          _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d)
           _theta = theta.reshape(-1, 2)[randidx].reshape(batch_size, -1, 2)
 
           inits = (w, loss_val, opt_state, _data, _theta)
@@ -260,6 +272,8 @@ for i,w in enumerate(ws):
   all_losses.append(loss)
   ws[i] = wtrained
 
+ensemble_weights = jnp.array([1./jnp.exp(all_losses[i][-1]) for i in range(num_models)])
+print("ensemble weights", ensemble_weights)
 
 
 
@@ -300,7 +314,7 @@ def predicted_fisher_grid(key, model, w, num_sims_avg=200):
       key, rng = jr.split(key)
       keys = jr.split(key, num_sims_avg)
 
-      sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T)[:, :, jnp.newaxis]
+      sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T) #[:, :, jnp.newaxis]
       sims /= datascale
 
       fpreds = jax.vmap(_getf)(sims)
@@ -313,7 +327,7 @@ key = jr.PRNGKey(4) # keep key the same across sims
 
 all_fisher_preds = [predicted_fisher_grid(key, models[i], ws[i]) for i in range(num_models)]
 all_fisher_preds = jnp.array(all_fisher_preds)
-avg_fisher_preds = all_fisher_preds.mean(0)
+avg_fisher_preds = jnp.average(all_fisher_preds, axis=0, weights=ensemble_weights)
 std_fisher_preds = all_fisher_preds.std(0)
 
 
@@ -388,7 +402,7 @@ sigma_ = jr.uniform(key2, shape=(10000,), minval=MIN_VAR, maxval=MAX_VAR)
 theta_test = jnp.stack([mu_, sigma_], axis=-1)
 
 keys = jr.split(key, num=10000)
-data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
+data_test = jax.vmap(simulator)(keys, theta_test) #[:, :, jnp.newaxis]
 data_test /= datascale
 
 # scale theta
@@ -424,6 +438,7 @@ np.savez(outname,
          #data=data_test,
          theta=theta_test,
          F_network_ensemble=ensemble_F_predictions,
+         ensemble_weights=ensemble_weights,
          F_true=F_true_out
          )
 

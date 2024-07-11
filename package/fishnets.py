@@ -67,7 +67,7 @@ def construct_fisher_matrix_multiple(outputs):
 
 class MLP(nn.Module):
   features: Sequence[int]
-  act: nn.activation = nn.elu
+  act: nn.activation = nn.swish
 
   @nn.compact
   def __call__(self, x):
@@ -82,7 +82,7 @@ class MLP(nn.Module):
 class Fishnet_from_embedding(nn.Module):
     n_p: int=2
     hidden: int=50
-    act: nn.activation = nn.elu
+    act: nn.activation = nn.swish
     
     @nn.compact
     def __call__(self, x):

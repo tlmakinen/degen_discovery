@@ -45,6 +45,20 @@ def minmax_inv(x,
     return x + xmin
 
 
+def weighted_std(values, weights, axis=0):
+    """
+    Return the weighted average and standard deviation.
+
+    They weights are in effect first normalized so that they 
+    sum to 1 (and so they must not all be 0).
+
+    values, weights -- NumPy ndarrays with the same shape.
+    """
+    average = jnp.average(values, weights=weights, axis=axis)
+    # Fast and numerically precise:
+    variance = jnp.average((values-average)**2, weights=weights, axis=axis)
+    return jnp.sqrt(variance)
+
 # -------------- DEFINE SIMULATOR AND PARAMS --------------
 n_d = 100
 input_shape = (n_d,)
@@ -55,6 +69,9 @@ MIN_VAR = 0.15
 MAX_MU = 5.0
 MIN_MU = -5.0
 
+SCALE_THETA = False
+
+
 n_params = 2
 
 
@@ -62,10 +79,16 @@ key = jr.PRNGKey(0)
 n_outputs = int(n_params + int(n_params * (n_params + 1)) // 2)
 hidden_size = 50
 
-
 # get scaling from data
-θs = jnp.array(np.load("toy_problem_regression_outputs.npz")["theta"])
-Fs = jnp.mean(jnp.array(np.load("toy_problem_regression_outputs.npz")["F_network_ensemble"]), 0)
+fname = "toy_problem_regression_outputs"
+if SCALE_THETA:
+  fname += "_scaled"
+
+θs = jnp.array(np.load(fname + ".npz")["theta"])
+ensemble_weights = np.load(fname + ".npz")["ensemble_weights"]
+Fs = jnp.average(jnp.array(np.load(fname + ".npz")["F_network_ensemble"]), 
+              axis=0, weights=ensemble_weights)
+
 
 
 max_x = θs.max(0)
@@ -110,7 +133,7 @@ def info_loss(w, theta_batched, F_batched):
         mymodel = lambda d: model.apply(w, d)
         J_eta = jax.jacrev(mymodel)(theta)
         Jeta_inv = jnp.linalg.inv(J_eta)
-        Q = Jeta_inv @ F @ Jeta_inv.T # put in variance
+        Q = Jeta_inv @ F @ Jeta_inv.T
         
         loss = norm((Q - jnp.eye(n_params))) + norm((jnp.linalg.inv(Q) - jnp.eye(n_params)))
         
@@ -234,7 +257,7 @@ def training_loop(key, w,
           else:
             counter += 1 
         
-      pbar.set_description('epoch loss %d: %.4f, detFeta: %.4f, val_detFeta: %.4f'%(j, loss, detFeta, val_detFeta))
+      pbar.set_description('epoch %d loss: %.4f, detFeta: %.4f, val_detFeta: %.4f'%(j, loss, detFeta, val_detFeta))
 
     
     return w, (losses, val_losses), (detFetas, val_detFetas)
@@ -259,8 +282,14 @@ def get_jacobian(θ):
 ηs = model.apply(w, θs)
 Jbar = jnp.concatenate(jnp.array([jax.vmap(get_jacobian)(t) for t in θs.reshape(-1, 100, 2)]))
 
-allFs = jnp.array(np.squeeze(np.load("toy_problem_regression_outputs.npz")["F_network_ensemble"]))
-dFs = jnp.std(allFs, 0) 
+allFs = jnp.array(np.squeeze(np.load(fname + ".npz")["F_network_ensemble"]))
+ensemble_weights = np.load(fname + ".npz")["ensemble_weights"]
+
+print("getting weighted dFs")
+Fs = jnp.average(jnp.array(np.load(fname + ".npz")["F_network_ensemble"]), 
+              axis=0, weights=ensemble_weights)
+
+dFs = weighted_std(allFs, ensemble_weights, axis=0) #jnp.std(allFs, 0) 
 
 
 # now set up the solver for δJ:
@@ -304,11 +333,16 @@ print("CALCULATING JACOBIAN ERROR")
 
 print("SAVING EVERYTHING")
 # save all outputs
-np.savez("flattened_coords_sr",
+outname = "flattened_coords_sr"
+if SCALE_THETA:
+  outname += "_scaled"
+  
+np.savez(outname,
          theta=θs,
          eta=ηs,
          Jacobians=Jbar,
          deltaJ=δJs,
-         meanF=allFs.mean(0),
-         dFs=dFs
+         meanF=Fs,
+         dFs=dFs,
+         F_ensemble=allFs
 )
