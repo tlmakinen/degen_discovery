@@ -155,7 +155,9 @@ def info_loss(w, theta_batched, F_batched):
 
 
 batch_size = 250
-epochs = 500
+epochs = 5500
+min_epochs = 1000
+patience = 300
 w = model.init(key, jnp.ones((n_params,)))
 
 noise = 0 # 1e-7
@@ -168,7 +170,10 @@ def training_loop(key, w,
                   F_fishnets,
                   val_size=2, # in batches
                   lr=5e-4,
-                  batch_size=batch_size, patience=200, epochs=5500, min_epochs=1000):
+                  batch_size=batch_size, 
+                  patience=patience,
+                  epochs=epochs, 
+                  min_epochs=min_epochs):
     
     # start optimiser
     tx = optax.adam(learning_rate=lr)
@@ -344,5 +349,6 @@ np.savez(outname,
          deltaJ=δJs,
          meanF=Fs,
          dFs=dFs,
-         F_ensemble=allFs
+         F_ensemble=allFs,
+         ensemble_weights=ensemble_weights
 )

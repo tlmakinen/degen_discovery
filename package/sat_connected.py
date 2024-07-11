@@ -65,26 +65,26 @@ def simulator(key, θ):
 
 # -------------- DEFINE ID SET-BASED MODEL --------------
 
-class SetEmbedding(nn.Module):
-  n_hidden: Sequence[int]
-  n_hidden_globals: Sequence[int]
-  n_inputs: int=1
+# class SetEmbedding(nn.Module):
+#   n_hidden: Sequence[int]
+#   n_hidden_globals: Sequence[int]
+#   n_inputs: int=1
 
-  def setup(self):
+#   def setup(self):
 
-        self.model_score = MLP(self.n_hidden)
-        self.model_fisher = MLP(self.n_hidden)
-        self.model_globals = MLP(self.n_hidden_globals)
+#         self.model_score = MLP(self.n_hidden)
+#         self.model_fisher = MLP(self.n_hidden)
+#         self.model_globals = MLP(self.n_hidden_globals)
 
-  def __call__(self, x):
+#   def __call__(self, x):
 
-        t = self.model_score(x)
-        fisher_cholesky = self.model_fisher(x) 
-        t = jnp.mean(t, axis=0)
-        fisher_cholesky = jnp.mean(fisher_cholesky, axis=0)
-        outputs = self.model_globals(jnp.concatenate([t, fisher_cholesky], axis=-1))
+#         t = self.model_score(x)
+#         fisher_cholesky = self.model_fisher(x) 
+#         t = jnp.mean(t, axis=0)
+#         fisher_cholesky = jnp.mean(fisher_cholesky, axis=0)
+#         outputs = self.model_globals(jnp.concatenate([t, fisher_cholesky], axis=-1))
         
-        return outputs
+#         return outputs
 
 
 
@@ -131,22 +131,13 @@ key = jr.PRNGKey(0)
 num_models = 5
 
 n_hiddens = [
-    [256, 256],
-    [128,128,128],
-    [128,128,128],
+    [256,256],
+    [256,256],
+    [256,256],
     [256,256,256],
     [256,256,256]
 ]
 
-# models = [nn.Sequential([
-#             SetEmbedding(n_hiddens[i], 
-#                           [50,50]),
-#             Fishnet_from_embedding(
-#                           n_p = 2
-                                      
-#             )]
-#         )
-#         for i in range(num_models)]
 
 models = [nn.Sequential([
             MLP(n_hiddens[i], act=nn.swish),
