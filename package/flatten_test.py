@@ -63,8 +63,8 @@ def weighted_std(values, weights, axis=0):
 n_d = 100
 input_shape = (n_d,)
 
-MAX_VAR = 10.0
-MIN_VAR = 0.15
+MAX_VAR = 15.0
+MIN_VAR = 0.1
 
 MAX_MU = 5.0
 MIN_MU = -5.0
@@ -133,7 +133,7 @@ def info_loss(w, theta_batched, F_batched):
         mymodel = lambda d: model.apply(w, d)
         J_eta = jax.jacrev(mymodel)(theta)
         Jeta_inv = jnp.linalg.inv(J_eta)
-        Q = Jeta_inv @ F @ Jeta_inv.T
+        Q = Jeta_inv.T @ F @ Jeta_inv
         
         loss = norm((Q - jnp.eye(n_params))) + norm((jnp.linalg.inv(Q) - jnp.eye(n_params)))
         

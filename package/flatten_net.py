@@ -7,7 +7,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from typing import Sequence, Any
+from typing import Sequence, Any, Callable
 Array = Any
 
 import numpy as np
@@ -18,7 +18,7 @@ import flax.linen as nn
 
 # custom activation function
 @jax.jit
-def almost_leaky(x: Array) -> Array:
+def smooth_leaky(x: Array) -> Array:
   r"""Almost Leaky rectified linear unit activation function.
   Computes the element-wise function:
   .. math::
@@ -36,11 +36,12 @@ def almost_leaky(x: Array) -> Array:
 
 class MLP(nn.Module):
   features: Sequence[int]
+  act: Callable = nn.softplus
 
   @nn.compact
   def __call__(self, x):
     for feat in self.features[:-1]:
-      x = nn.softplus(nn.Dense(feat)(x))
+      x = self.act(nn.Dense(feat)(x))
     x = nn.Dense(self.features[-1])(x)
     return x
 
@@ -50,7 +51,8 @@ class custom_MLP(nn.Module):
   features: Sequence[int]
   max_x: jnp.array
   min_x: jnp.array
-  
+  act: Callable = nn.softplus
+
 
   @nn.compact
   def __call__(self, x):
@@ -60,7 +62,7 @@ class custom_MLP(nn.Module):
     x += 1.0
     
     for feat in self.features[:-1]:
-      x = nn.softplus(nn.Dense(feat)(x))
+      x = self.act(nn.Dense(feat)(x))
     x = nn.Dense(self.features[-1])(x)
     return x
   

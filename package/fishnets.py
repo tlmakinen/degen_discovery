@@ -5,13 +5,31 @@ import optax
 
 import numpy as np
 import math
-from typing import Sequence
+from typing import Sequence, Callable, Any
 #import tensorflow_probability.substrates.jax as tfp
 
 import matplotlib.pyplot as plt
 
 
 from functools import partial
+Array = Any
+
+# custom activation function
+@jax.jit
+def smooth_leaky(x: Array) -> Array:
+  r"""Almost Leaky rectified linear unit activation function.
+  Computes the element-wise function:
+  .. math::
+    \mathrm{almost\_leaky}(x) = \begin{cases}
+      x, & x \leq -1\\
+      - |x|^3/3, & -1 \leq x < 1\\
+      3x & x > 1
+    \end{cases}
+  Args:
+    x : input array
+  """
+  return jnp.where(x < -1, x, jnp.where((x < 1), ((-(jnp.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x))
+
 
 
 # drop-in replacement for tfp's fill_triangular function to remove substrates dependency
