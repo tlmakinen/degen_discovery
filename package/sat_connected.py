@@ -128,22 +128,24 @@ if SCALE_THETA:
 key = jr.PRNGKey(0)
 
 # initialise several models
-num_models = 5
+num_models = 1
 
 n_hiddens = [
-    [256,256],
-    [256,256],
-    [256,256],
+    [128,128,128],
+    [256,256,256],
+    [256,256,256],
     [256,256,256],
     [256,256,256]
 ]
 
+act = nn.swish
 
 models = [nn.Sequential([
-            MLP(n_hiddens[i], act=nn.swish),
+            MLP(n_hiddens[i], 
+                act=act),
             Fishnet_from_embedding(
-                          n_p = 2
-                                      
+                          n_p = 2,
+                          act=act
             )]
         )
         for i in range(num_models)]
@@ -154,10 +156,11 @@ ws = [m.init(keys[i], data[0]) for i,m in enumerate(models)]
 
 
 batch_size = 100
+patience = 200
 epochs = 4000
 key = jr.PRNGKey(999)
 
-def training_loop(key, model, w, data, theta, patience=100,
+def training_loop(key, model, w, data, theta, patience=patience,
                     epochs=epochs, min_epochs=100):
 
     @jax.jit

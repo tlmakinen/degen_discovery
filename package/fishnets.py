@@ -61,7 +61,7 @@ def fill_diagonal(a, val):
 
 def construct_fisher_matrix_single(outputs):
     Q = fill_lower_tri(outputs)
-    middle = jnp.diag(jnp.triu(Q) - nn.softplus(jnp.triu(Q)))
+    middle = jnp.diag(jnp.tril(Q) - nn.softplus(jnp.tril(Q)))
     padding = jnp.zeros(Q.shape)
 
     L = Q - fill_diagonal(padding, middle)
@@ -74,7 +74,7 @@ def construct_fisher_matrix_multiple(outputs):
     # vmap the jnp.diag function for the batch
     _diag = jax.vmap(jnp.diag)
 
-    middle = _diag(jnp.triu(Q) - nn.softplus(jnp.triu(Q)))
+    middle = _diag(jnp.tril(Q) - nn.softplus(jnp.tril(Q)))
     padding = jnp.zeros(Q.shape)
 
     # vmap the fill_diagonal code
@@ -113,5 +113,7 @@ class Fishnet_from_embedding(nn.Module):
         fisher_cholesky = outputs[self.n_p:]
 
         F = construct_fisher_matrix_single((fisher_cholesky)) + priorCinv
+
+        #t = jnp.einsum("ij,j->i", jnp.linalg.inv(F), t)
 
         return t, F
