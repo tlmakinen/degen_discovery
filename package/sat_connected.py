@@ -138,6 +138,9 @@ n_hiddens = [
     [256,256,256]
 ]
 
+mish = lambda x: x * nn.tanh(nn.softplus(x))
+
+
 act = nn.swish
 
 models = [nn.Sequential([
@@ -379,6 +382,7 @@ for i in range(num_models):
   ax2.set_xlabel('$\mu$')
   ax2.set_title(r'$ \frac{1}{2} \ln \det \langle F_{\rm NN}(\theta) \rangle $')
   plt.tight_layout()
+  plt.savefig("saturation_test_model_%d"%(i+1), dpi=400)
   plt.close()
 
 
