@@ -113,9 +113,14 @@ data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
 theta = theta_.copy()
 
 # rescale data for network
-datascale = 10.0
-data /= datascale
-data_test /= datascale
+data_scaler = MinMaxScaler(feature_range=(-1, 1))
+#datascale = 10.0
+data = data_scaler.fit_transform(data.reshape(-1, n_d)).reshape(data.shape)
+data_test = data_scaler.transform(data_test.reshape(-1, n_d)).reshape(data_test.shape)
+#data /= datascale
+#data_test /= datascale
+
+
 
 if SCALE_THETA:
   print("scaling theta")
@@ -125,13 +130,13 @@ if SCALE_THETA:
 #theta_test = minmax(theta)
 
 # -------------- INITIALISE MODELS --------------
-key = jr.PRNGKey(0)
+key = jr.PRNGKey(201)
 
 # initialise several models
 num_models = 1
 
 n_hiddens = [
-    [128,128,128],
+    [256,256,256],
     [256,256,256],
     [256,256,256],
     [256,256,256],
@@ -141,14 +146,15 @@ n_hiddens = [
 mish = lambda x: x * nn.tanh(nn.softplus(x))
 
 
-act = nn.swish
+act = nn.hard_swish
 
 models = [nn.Sequential([
             MLP(n_hiddens[i], 
                 act=act),
             Fishnet_from_embedding(
                           n_p = 2,
-                          act=act
+                          act=act,
+                          hidden=256
             )]
         )
         for i in range(num_models)]
@@ -178,7 +184,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
                                                 jnp.einsum('ijk,ik->ij', F, (theta_batched - mle))) \
                                                       + 0.5*jnp.log(jnp.linalg.det(F)), axis=0)
     
-    steps = epochs*(theta.shape[0]//batch_size) + epochs
+    #steps = epochs*(theta.shape[0]//batch_size) + epochs
     #scheduler = optax.cosine_onecycle_schedule(steps, 
     #                  peak_value=1e-3, pct_start=0.3, 
     #                  div_factor=25.0, 
@@ -312,7 +318,9 @@ def predicted_fisher_grid(key, model, w, num_sims_avg=200):
       keys = jr.split(key, num_sims_avg)
 
       sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T) #[:, :, jnp.newaxis]
-      sims /= datascale
+      #sims /= datascale
+      sims = data_scaler.transform(sims.reshape(-1, n_d)).reshape(sims.shape)
+
 
       fpreds = jax.vmap(_getf)(sims)
 
@@ -401,7 +409,11 @@ theta_test = jnp.stack([mu_, sigma_], axis=-1)
 
 keys = jr.split(key, num=10000)
 data_test = jax.vmap(simulator)(keys, theta_test) #[:, :, jnp.newaxis]
-data_test /= datascale
+data_test = data_scaler.transform(data_test.reshape(-1, n_d)).reshape(data_test.shape)
+
+#data_test /= datascale
+
+
 
 # scale theta
 if SCALE_THETA:

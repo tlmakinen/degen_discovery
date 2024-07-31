@@ -59,11 +59,13 @@ class custom_MLP(nn.Module):
     
     # first adjust min-max
     x = (x - self.min_x) / (self.max_x - self.min_x)
-    x += 1.0
+    #x += 1.0
+
+    x = self.act(nn.Dense(self.features[0])(x))
     
-    for feat in self.features[:-1]:
-      x = self.act(nn.Dense(feat)(x))
+    for feat in self.features[1:-1]:
+      # residual connections
+      x += self.act(nn.Dense(feat)(x))
     x = nn.Dense(self.features[-1])(x)
     return x
-  
 

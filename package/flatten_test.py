@@ -77,7 +77,7 @@ n_params = 2
 
 key = jr.PRNGKey(0)
 n_outputs = int(n_params + int(n_params * (n_params + 1)) // 2)
-hidden_size = 50
+hidden_size = 200
 
 # get scaling from data
 fname = "toy_problem_regression_outputs"
@@ -134,7 +134,7 @@ def info_loss(w, theta_batched, F_batched):
         mymodel = lambda d: model.apply(w, d)
         J_eta = jax.jacrev(mymodel)(theta)
         Jeta_inv = jnp.linalg.inv(J_eta)
-        Q = Jeta_inv.T @ F @ Jeta_inv
+        Q = Jeta_inv @ F @ Jeta_inv.T
         
         loss = norm((Q - jnp.eye(n_params))) + norm((jnp.linalg.inv(Q) - jnp.eye(n_params)))
         

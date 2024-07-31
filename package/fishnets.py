@@ -105,15 +105,19 @@ class Fishnet_from_embedding(nn.Module):
     @nn.compact
     def __call__(self, x):
         priorCinv = jnp.eye(self.n_p)
-        outdim = self.n_p + (self.n_p * (self.n_p + 1) // 2)
-        outputs = self.act(nn.Dense(self.hidden)(x))
-        outputs = nn.Dense(outdim)(x)
+        t = self.act(nn.Dense(self.hidden)(x))
+        fisher_cholesky = self.act(nn.Dense(self.hidden)(x))
 
-        t = outputs[:self.n_p] 
-        fisher_cholesky = outputs[self.n_p:]
+        t = nn.Dense(self.n_p)(t)
+        fisher_cholesky = nn.Dense((self.n_p * (self.n_p + 1) // 2))(fisher_cholesky)
 
         F = construct_fisher_matrix_single((fisher_cholesky)) + priorCinv
-
         #t = jnp.einsum("ij,j->i", jnp.linalg.inv(F), t)
 
         return t, F
+    
+
+
+
+
+
