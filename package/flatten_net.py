@@ -65,7 +65,7 @@ class custom_MLP(nn.Module):
     
     for feat in self.features[1:-1]:
       # residual connections
-      x += self.act(nn.Dense(feat)(x))
+      x = self.act(nn.Dense(feat)(x))
     x = nn.Dense(self.features[-1])(x)
     return x
 
