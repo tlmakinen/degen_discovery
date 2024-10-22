@@ -1,0 +1,14 @@
+
+
+
+# toy model prior settings
+MAX_VAR: 15.0
+MIN_VAR: 0.1
+
+MAX_MU: 5.0
+MIN_MU: -5.0
+
+n_d: 100
+
+scale_theta_to: [0.5, 1.5]
+scale_theta: 0

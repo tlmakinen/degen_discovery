@@ -86,10 +86,14 @@ if SCALE_THETA:
 
 θs = jnp.array(np.load(fname + ".npz")["theta"])
 ensemble_weights = np.load(fname + ".npz")["ensemble_weights"]
-Fs = jnp.average(jnp.array(np.load(fname + ".npz")["F_network_ensemble"]), 
-              axis=0, weights=ensemble_weights)
 
+# no averaging over Fishers
+Fs = jnp.array(np.load(fname + ".npz")["F_network_ensemble"])
+num_models = Fs.shape[0]
 
+# transpose fishers to batch
+Fs = jnp.transpose(Fs, axes=(1,0,2,3))
+print(Fs.shape)
 
 max_x = θs.max(0)
 min_x = θs.min(0)
@@ -146,9 +150,15 @@ def info_loss(w, theta_batched, F_batched):
 
         return loss, jnp.linalg.det(Q)
     
-    loss,Q = jax.vmap(fn)(theta_batched, F_batched)
+    #fn2 = lambda f: jax.vmap(fn)(theta_batched, f)
+    batched_params = jnp.tile(theta_batched, (num_models, 1, 1)).transpose((1,0,2))
+    print("b param", batched_params.shape)
+    print("f", F_batched.shape)
+    loss,Q = jax.vmap(jax.vmap(fn))(batched_params, F_batched) # batch over network outputs
 
-    return jnp.mean(loss), jnp.mean(Q)
+    print("loss", loss.shape)
+    print("Q", Q.shape)
+    return jnp.mean(jnp.mean(loss, -1)), jnp.mean(jnp.mean(Q, -1))
 
 
 
@@ -163,8 +173,10 @@ w = model.init(key, jnp.ones((n_params,)))
 
 noise = 0 # 1e-7
 theta_true = θs.reshape(-1, batch_size, n_params)
-F_fishnets = Fs.reshape(-1, batch_size, n_params, n_params)
+F_fishnets = Fs.reshape(-1, batch_size, num_models, n_params, n_params)
+#F_fishnets = Fs.reshape(-1, batch_size, n_params, n_params)
 
+print("F_fishnets", F_fishnets.shape)
 
 def training_loop(key, w, 
                   theta_true,
@@ -198,14 +210,18 @@ def training_loop(key, w,
         return w, loss_val, opt_state, detFeta, key, theta_true, F_fishnets
 
 
-  
+    #print("f fish", F_fishnets.shape)
     # train-val split
     mask = jr.uniform(key, shape=(theta_true.shape[0],)) < 0.9
-    F_train = F_fishnets[:-val_size]
-    F_val = F_fishnets[-val_size:].reshape(-1, n_params, n_params)
+    F_train = F_fishnets[:-val_size, ...]
+    F_val = F_fishnets[-val_size:, ...].reshape(-1, num_models, n_params, n_params)
+
+    #print("f val", F_val.shape)
 
     theta_train = theta_true[:-val_size]
     theta_val = theta_true[-val_size:].reshape(-1, n_params)
+
+    #print("theta val", theta_val.shape)
 
     losses = jnp.zeros(epochs)
     detFetas = jnp.zeros(epochs)
@@ -240,7 +256,7 @@ def training_loop(key, w,
 
           # shuffle data every epoch
           randidx = jr.permutation(key, jnp.arange(num_sims), independent=True)
-          F_train = F_train.reshape(-1, n_params, n_params)[randidx].reshape(-1, batch_size, n_params, n_params)
+          F_train = F_train.reshape(-1, num_models, n_params, n_params)[randidx].reshape(-1, batch_size, num_models, n_params, n_params)
           theta_train = theta_train.reshape(-1, n_params)[randidx].reshape(-1, batch_size, n_params)
 
           inits = (w, loss, opt_state, detFeta, key, theta_train, F_train)
@@ -298,6 +314,7 @@ Fs = jnp.average(jnp.array(np.load(fname + ".npz")["F_network_ensemble"]),
 dFs = weighted_std(allFs, ensemble_weights, axis=0) #jnp.std(allFs, 0) 
 
 
+
 # now set up the solver for δJ:
 # for now let's do this all in numpy and vanilla scipy
 
@@ -348,7 +365,7 @@ np.savez(outname,
          eta=ηs,
          Jacobians=Jbar,
          deltaJ=δJs,
-         delta_invJ=δinvJs,
+         delta_invJ=δinvJ,
          meanF=Fs,
          dFs=dFs,
          F_ensemble=allFs,

@@ -8,6 +8,7 @@ import numpy as np
 import math
 from typing import Sequence
 from tqdm import tqdm
+import yaml,os
 
 from sklearn.preprocessing import MinMaxScaler
 
@@ -16,22 +17,29 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from fishnets import *
 
+# Function to load yaml configuration file
+def load_config(config_name, config_path="./"):
+    with open(os.path.join(config_path, config_name)) as file:
+        config = yaml.safe_load(file)
+
+    return config
 
 # -------------- DEFINE SIMULATOR AND PARAMS --------------
-n_d = 100
+config = load_config('test_config.yaml')
+
+n_d = config["n_d"]
 input_shape = (n_d,)
 
-MAX_VAR = 15.0
-MIN_VAR = 0.1
+MAX_VAR = config["MAX_VAR"]
+MIN_VAR = config["MIN_VAR"]
 
-MAX_MU = 5.0
-MIN_MU = -5.0
+MAX_MU = config["MAX_MU"]
+MIN_MU = config["MIN_MU"]
+SCALE_THETA = bool(config["SCALE_THETA"])
+scale_theta_to = config["scale_theta_to"]
 
 xmin = jnp.array([MIN_MU, MIN_VAR])
 xmax = jnp.array([MAX_MU, MAX_VAR])
-scale_theta_to = (0.5, 1.5)
-
-SCALE_THETA = False
 
 
 def minmax(x, 
@@ -53,14 +61,19 @@ def minmax_inv(x,
     x *= (xmax - xmin)
     return x + xmin
 
+# @jax.jit
+# def Fisher(θ, n_d=n_d):
+#     Σ = 1./θ[1]
+#     return jnp.array([[n_d / Σ, 0.], [0., n_d / (2. * Σ**2.)]])
+
 @jax.jit
-def Fisher(θ, n_d=n_d):
-    Σ = θ[1]
-    return jnp.array([[n_d / Σ, 0.], [0., n_d / (2. * Σ**2.)]])
+def Fisher(θ, n_d=100):
+    A = θ[1]
+    return jnp.array([[n_d * A, 0.], [0., n_d * (0.75 * jnp.sqrt(2*jnp.pi) * A**(-5./2.))]])
 
 @jax.jit
 def simulator(key, θ):
-    return θ[0] + jr.normal(key, shape=input_shape) * jnp.sqrt(θ[1])
+    return θ[0] + jr.normal(key, shape=input_shape) * jnp.sqrt((1./θ[1]))
 
 
 # -------------- DEFINE ID SET-BASED MODEL --------------
@@ -133,27 +146,34 @@ if SCALE_THETA:
 key = jr.PRNGKey(201)
 
 # initialise several models
-num_models = 5
+num_models = 14
 
-n_hiddens = [
-    [256,256,256],
-    [256,256,256],
-    [256,256,256],
-    [256,256,256],
-    [256,256,256]
-]
+n_hiddens = [[256,256,256]]*num_models
 
 mish = lambda x: x * nn.tanh(nn.softplus(x))
 
-
-act = nn.hard_swish
+acts = [nn.relu, 
+        nn.relu,
+        nn.relu,
+        nn.leaky_relu,
+        nn.leaky_relu,
+        nn.leaky_relu,
+        nn.elu,   # not as good
+        nn.elu,   # not as good
+        nn.swish, # not as good
+        nn.swish, # not as good
+        nn.gelu,
+        nn.gelu,
+        nn.gelu,
+        nn.gelu,
+        ]
 
 models = [nn.Sequential([
             resMLP(n_hiddens[i], 
-                act=act),
+                act=acts[i]),
             Fishnet_from_embedding(
                           n_p = 2,
-                          act=act,
+                          act=acts[i],
                           hidden=256
             )]
         )
@@ -281,8 +301,6 @@ print("ensemble weights", ensemble_weights)
 
 
 # LOOK AT GRID OF FISHERS
-lo = [-1.0, 0.5]
-hi = [1.0, 3.0]
 
 num = 10
 

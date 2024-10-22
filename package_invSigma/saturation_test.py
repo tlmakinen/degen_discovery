@@ -22,7 +22,7 @@ n_d = 100
 input_shape = (n_d,)
 
 MAX_VAR = 15.0
-MIN_VAR = 0.1
+MIN_VAR = 0.15
 
 MAX_MU = 5.0
 MIN_MU = -5.0
@@ -31,7 +31,7 @@ xmin = jnp.array([MIN_MU, MIN_VAR])
 xmax = jnp.array([MAX_MU, MAX_VAR])
 scale_theta_to = (0.5, 1.5)
 
-SCALE_THETA = False
+SCALE_THETA = True
 
 
 def minmax(x, 
@@ -65,26 +65,26 @@ def simulator(key, θ):
 
 # -------------- DEFINE ID SET-BASED MODEL --------------
 
-# class SetEmbedding(nn.Module):
-#   n_hidden: Sequence[int]
-#   n_hidden_globals: Sequence[int]
-#   n_inputs: int=1
+class SetEmbedding(nn.Module):
+  n_hidden: Sequence[int]
+  n_hidden_globals: Sequence[int]
+  n_inputs: int=1
 
-#   def setup(self):
+  def setup(self):
 
-#         self.model_score = MLP(self.n_hidden)
-#         self.model_fisher = MLP(self.n_hidden)
-#         self.model_globals = MLP(self.n_hidden_globals)
+        self.model_score = MLP(self.n_hidden)
+        self.model_fisher = MLP(self.n_hidden)
+        self.model_globals = MLP(self.n_hidden_globals)
 
-#   def __call__(self, x):
+  def __call__(self, x):
 
-#         t = self.model_score(x)
-#         fisher_cholesky = self.model_fisher(x) 
-#         t = jnp.mean(t, axis=0)
-#         fisher_cholesky = jnp.mean(fisher_cholesky, axis=0)
-#         outputs = self.model_globals(jnp.concatenate([t, fisher_cholesky], axis=-1))
+        t = self.model_score(x)
+        fisher_cholesky = self.model_fisher(x) 
+        t = jnp.mean(t, axis=0)
+        fisher_cholesky = jnp.mean(fisher_cholesky, axis=0)
+        outputs = self.model_globals(jnp.concatenate([t, fisher_cholesky], axis=-1))
         
-#         return outputs
+        return outputs
 
 
 
@@ -113,14 +113,9 @@ data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
 theta = theta_.copy()
 
 # rescale data for network
-data_scaler = MinMaxScaler(feature_range=(-1, 1))
-#datascale = 10.0
-data = data_scaler.fit_transform(data.reshape(-1, n_d)).reshape(data.shape)
-data_test = data_scaler.transform(data_test.reshape(-1, n_d)).reshape(data_test.shape)
-#data /= datascale
-#data_test /= datascale
-
-
+datascale = 10.0
+data /= datascale
+data_test /= datascale
 
 if SCALE_THETA:
   print("scaling theta")
@@ -130,47 +125,37 @@ if SCALE_THETA:
 #theta_test = minmax(theta)
 
 # -------------- INITIALISE MODELS --------------
-key = jr.PRNGKey(201)
+key = jr.PRNGKey(0)
 
 # initialise several models
-num_models = 5
+num_models = 3
 
 n_hiddens = [
-    [256,256,256],
-    [256,256,256],
-    [256,256,256],
-    [256,256,256],
+    [128, 128],
+    [128,128,128],
     [256,256,256]
 ]
 
-mish = lambda x: x * nn.tanh(nn.softplus(x))
-
-
-act = nn.hard_swish
-
 models = [nn.Sequential([
-            resMLP(n_hiddens[i], 
-                act=act),
+            SetEmbedding(n_hiddens[i], 
+                          [50,50]),
             Fishnet_from_embedding(
-                          n_p = 2,
-                          act=act,
-                          hidden=256
+                          n_p = 2
+                                      
             )]
         )
         for i in range(num_models)]
 
-data = jnp.squeeze(data)
 keys = jr.split(key, num=num_models)
 ws = [m.init(keys[i], data[0]) for i,m in enumerate(models)]
 
 
 batch_size = 100
-patience = 200
-epochs = 4000
+epochs = 400
 key = jr.PRNGKey(999)
 
-def training_loop(key, model, w, data, theta, patience=patience,
-                    epochs=epochs, min_epochs=400):
+def training_loop(key, model, w, data, theta, patience=20,
+                    epochs=epochs, min_epochs=100):
 
     @jax.jit
     def kl_loss(w, x_batched, theta_batched):
@@ -184,13 +169,13 @@ def training_loop(key, model, w, data, theta, patience=patience,
                                                 jnp.einsum('ijk,ik->ij', F, (theta_batched - mle))) \
                                                       + 0.5*jnp.log(jnp.linalg.det(F)), axis=0)
     
-    scheduler = optax.warmup_cosine_decay_schedule(
-      init_value=1e-5, peak_value=1e-3, 
-      warmup_steps=200, decay_steps=400, end_value=5e-6
-    )
+    steps = epochs*(theta.shape[0]//batch_size) + epochs
+    #scheduler = optax.cosine_onecycle_schedule(steps, 
+    #                  peak_value=1e-3, pct_start=0.3, 
+    #                  div_factor=25.0, 
+    #                  final_div_factor=10000.0)
 
-    #tx = optax.adam(learning_rate=5e-5) # scheduler
-    tx = optax.adam(learning_rate=scheduler)
+    tx = optax.adam(learning_rate=5e-5) # scheduler
     opt_state = tx.init(w)
     loss_grad_fn = jax.value_and_grad(kl_loss)
 
@@ -200,7 +185,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
         y_samples = _theta[i]
 
         loss, grads = loss_grad_fn(w, x_samples, y_samples)
-        updates, opt_state = tx.update(grads, opt_state, w)
+        updates, opt_state = tx.update(grads, opt_state)
         w = optax.apply_updates(w, updates)
 
         # keep running average
@@ -230,7 +215,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
           
           # shuffle data every epoch
           randidx = jr.permutation(key, jnp.arange(theta.reshape(-1, 2).shape[0]), independent=True)
-          _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d)
+          _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d, 1)
           _theta = theta.reshape(-1, 2)[randidx].reshape(batch_size, -1, 2)
 
           inits = (w, loss_val, opt_state, _data, _theta)
@@ -275,8 +260,6 @@ for i,w in enumerate(ws):
   all_losses.append(loss)
   ws[i] = wtrained
 
-ensemble_weights = jnp.array([1./jnp.exp(all_losses[i][-1]) for i in range(num_models)])
-print("ensemble weights", ensemble_weights)
 
 
 
@@ -317,10 +300,8 @@ def predicted_fisher_grid(key, model, w, num_sims_avg=200):
       key, rng = jr.split(key)
       keys = jr.split(key, num_sims_avg)
 
-      sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T) #[:, :, jnp.newaxis]
-      #sims /= datascale
-      sims = data_scaler.transform(sims.reshape(-1, n_d)).reshape(sims.shape)
-
+      sims = jax.vmap(simulator)(keys, jnp.tile(jnp.array([[_mu], [_sigma]]), num_sims_avg).T)[:, :, jnp.newaxis]
+      sims /= datascale
 
       fpreds = jax.vmap(_getf)(sims)
 
@@ -332,7 +313,7 @@ key = jr.PRNGKey(4) # keep key the same across sims
 
 all_fisher_preds = [predicted_fisher_grid(key, models[i], ws[i]) for i in range(num_models)]
 all_fisher_preds = jnp.array(all_fisher_preds)
-avg_fisher_preds = jnp.average(all_fisher_preds, axis=0, weights=ensemble_weights)
+avg_fisher_preds = all_fisher_preds.mean(0)
 std_fisher_preds = all_fisher_preds.std(0)
 
 
@@ -390,7 +371,6 @@ for i in range(num_models):
   ax2.set_xlabel('$\mu$')
   ax2.set_title(r'$ \frac{1}{2} \ln \det \langle F_{\rm NN}(\theta) \rangle $')
   plt.tight_layout()
-  plt.savefig("saturation_test_model_%d"%(i+1), dpi=400)
   plt.close()
 
 
@@ -408,12 +388,8 @@ sigma_ = jr.uniform(key2, shape=(10000,), minval=MIN_VAR, maxval=MAX_VAR)
 theta_test = jnp.stack([mu_, sigma_], axis=-1)
 
 keys = jr.split(key, num=10000)
-data_test = jax.vmap(simulator)(keys, theta_test) #[:, :, jnp.newaxis]
-data_test = data_scaler.transform(data_test.reshape(-1, n_d)).reshape(data_test.shape)
-
-#data_test /= datascale
-
-
+data_test = jax.vmap(simulator)(keys, theta_test)[:, :, jnp.newaxis]
+data_test /= datascale
 
 # scale theta
 if SCALE_THETA:
@@ -448,7 +424,6 @@ np.savez(outname,
          #data=data_test,
          theta=theta_test,
          F_network_ensemble=ensemble_F_predictions,
-         ensemble_weights=ensemble_weights,
          F_true=F_true_out
          )
 
