@@ -18,9 +18,18 @@ import jax.random as jr
 
 import flax.linen as nn
 import scipy
+import yaml,os
 
 from fishnets import *
 from flatten_net import *
+
+
+# Function to load yaml configuration file
+def load_config(config_name, config_path="./"):
+    with open(os.path.join(config_path, config_name)) as file:
+        config = yaml.safe_load(file)
+
+    return config
 
 
 Array = Any
@@ -60,17 +69,19 @@ def weighted_std(values, weights, axis=0):
     return jnp.sqrt(variance)
 
 # -------------- DEFINE SIMULATOR AND PARAMS --------------
-n_d = 100
+
+config = load_config('test_config.yaml')
+
+n_d = config["n_d"]
 input_shape = (n_d,)
 
-MAX_VAR = 15.0
-MIN_VAR = 0.1
+MAX_VAR = config["MAX_VAR"]
+MIN_VAR = config["MIN_VAR"]
 
-MAX_MU = 5.0
-MIN_MU = -5.0
-
-SCALE_THETA = False
-
+MAX_MU = config["MAX_MU"]
+MIN_MU = config["MIN_MU"]
+SCALE_THETA = bool(config["SCALE_THETA"])
+scale_theta_to = config["scale_theta_to"]
 
 n_params = 2
 
@@ -133,7 +144,7 @@ def info_loss(w, theta_batched, F_batched):
                         
         mymodel = lambda d: model.apply(w, d)
         J_eta = jax.jacrev(mymodel)(theta)
-        Jeta_inv = jnp.linalg.inv(J_eta)
+        Jeta_inv = jnp.linalg.pinv(J_eta)
         Q = Jeta_inv @ F @ Jeta_inv.T
         
         loss = norm((Q - jnp.eye(n_params))) + norm((jnp.linalg.inv(Q) - jnp.eye(n_params)))
@@ -158,10 +169,10 @@ def info_loss(w, theta_batched, F_batched):
 batch_size = 250
 epochs = 5500
 min_epochs = 1000
-patience = 300
+patience = 1000
 w = model.init(key, jnp.ones((n_params,)))
 
-noise = 0 # 1e-7
+noise = 1e-7
 theta_true = θs.reshape(-1, batch_size, n_params)
 F_fishnets = Fs.reshape(-1, batch_size, n_params, n_params)
 
@@ -188,8 +199,8 @@ def training_loop(key, w,
         F_samples = F_fishnets[i]
         
         # add some noise to Fisher
-        #F_samples += jr.normal(key, shape=F_samples.shape)*noise
-        #theta_samples += jr.normal(key, shape=theta_samples.shape)*noise
+        F_samples += jr.normal(key, shape=F_samples.shape)*noise
+        theta_samples += jr.normal(key, shape=theta_samples.shape)*noise
             
         (loss_val, detFeta), grads = loss_grad_fn(w, theta_samples, F_samples)
         updates, opt_state = tx.update(grads, opt_state)
@@ -273,7 +284,7 @@ def training_loop(key, w,
 # RUN LOOP
 print("TRAINING FLATTENER NET")
 key,rng = jr.split(key)
-w, all_loss, all_dets = training_loop(key, w, theta_true, F_fishnets, lr=1e-4)
+w, all_loss, all_dets = training_loop(key, w, theta_true, F_fishnets, lr=1e-5)
 
 
 
@@ -335,7 +346,7 @@ def get_δJ(F, δF, Jbar):
 
 print("CALCULATING JACOBIAN ERROR")
 
-δJs, δinvJ  = get_δJ(allFs.mean(0), dFs, Jbar)
+δJs, δinvJ  = get_δJ(Fs, dFs, Jbar)
 
 print("SAVING EVERYTHING")
 # save all outputs
@@ -385,7 +396,7 @@ data = etas[:, 0].reshape(xs.shape)
 im = plt.contourf(xs, ys, (data), cmap='viridis', levels=20)
 plt.colorbar(im)
 #plt.yscale('log')
-plt.ylabel('$\Sigma$')
+plt.ylabel('$1/\Sigma$')
 plt.xlabel('$\mu$')
 plt.title(r'$ \eta_1$')
 plt.legend(framealpha=0., loc='lower left')
@@ -396,7 +407,7 @@ data = etas[:, 1].reshape(xs.shape)
 im = plt.contourf(xs, ys, (data), cmap='viridis', levels=20)
 plt.colorbar(im)
 #plt.yscale('log')
-plt.ylabel('$\Sigma$')
+plt.ylabel('$1/\Sigma$')
 plt.xlabel('$\mu$')
 plt.title(r'$ \eta_2$')
 plt.legend(framealpha=0., loc='lower left')
