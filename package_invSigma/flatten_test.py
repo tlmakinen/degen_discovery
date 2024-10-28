@@ -384,8 +384,6 @@ xs,ys = jnp.meshgrid(xs, ys)
 X = jnp.stack([xs.flatten(), (ys.flatten())], axis=-1)
 etas = model.apply(w, X)
 
-import scipy.ndimage
-from scipy.ndimage.filters import gaussian_filter
 
 plt.figure(figsize=(10, 3))
 

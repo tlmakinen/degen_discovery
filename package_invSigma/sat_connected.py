@@ -76,28 +76,6 @@ def simulator(key, θ):
     return θ[0] + jr.normal(key, shape=input_shape) * jnp.sqrt((1./θ[1]))
 
 
-# -------------- DEFINE ID SET-BASED MODEL --------------
-
-# class SetEmbedding(nn.Module):
-#   n_hidden: Sequence[int]
-#   n_hidden_globals: Sequence[int]
-#   n_inputs: int=1
-
-#   def setup(self):
-
-#         self.model_score = MLP(self.n_hidden)
-#         self.model_fisher = MLP(self.n_hidden)
-#         self.model_globals = MLP(self.n_hidden_globals)
-
-#   def __call__(self, x):
-
-#         t = self.model_score(x)
-#         fisher_cholesky = self.model_fisher(x) 
-#         t = jnp.mean(t, axis=0)
-#         fisher_cholesky = jnp.mean(fisher_cholesky, axis=0)
-#         outputs = self.model_globals(jnp.concatenate([t, fisher_cholesky], axis=-1))
-        
-#         return outputs
 
 
 
@@ -145,10 +123,6 @@ if SCALE_THETA:
 # -------------- INITIALISE MODELS --------------
 key = jr.PRNGKey(201)
 
-# initialise several models
-num_models = 14
-
-n_hiddens = [[256,256,256]]*num_models
 
 mish = lambda x: x * nn.tanh(nn.softplus(x))
 
@@ -162,14 +136,25 @@ acts = [nn.relu,
         nn.elu,   # not as good
         nn.swish, # not as good
         nn.swish, # not as good
+        mish,
+        mish,
+        nn.gelu,
+        nn.gelu,
+        nn.gelu,
+        nn.gelu,
         nn.gelu,
         nn.gelu,
         nn.gelu,
         nn.gelu,
         ]
 
+# initialise several models
+num_models = len(acts)
+
+n_hiddens = [[256,256,256]]*num_models
+
 models = [nn.Sequential([
-            resMLP(n_hiddens[i], 
+            MLP(n_hiddens[i], 
                 act=acts[i]),
             Fishnet_from_embedding(
                           n_p = 2,
@@ -204,13 +189,13 @@ def training_loop(key, model, w, data, theta, patience=patience,
                                                 jnp.einsum('ijk,ik->ij', F, (theta_batched - mle))) \
                                                       + 0.5*jnp.log(jnp.linalg.det(F)), axis=0)
     
-    scheduler = optax.warmup_cosine_decay_schedule(
-      init_value=1e-5, peak_value=1e-3, 
-      warmup_steps=200, decay_steps=400, end_value=5e-6
-    )
+    #scheduler = optax.warmup_cosine_decay_schedule(
+    #  init_value=1e-5, peak_value=1e-3, 
+    #  warmup_steps=200, decay_steps=400, end_value=5e-6
+    #)
 
     #tx = optax.adam(learning_rate=5e-5) # scheduler
-    tx = optax.adam(learning_rate=scheduler)
+    tx = optax.adam(learning_rate=5e-5)
     opt_state = tx.init(w)
     loss_grad_fn = jax.value_and_grad(kl_loss)
 
@@ -239,6 +224,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
     counter = 0
     patience_counter = 0
     best_loss = jnp.inf
+    best_w = w
 
     pbar = tqdm(range(epochs), leave=True, position=0)
 
@@ -270,6 +256,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
           # patience criterion
           if loss_val < best_loss:
               best_loss = loss_val
+              best_w = w
 
           else:
               patience_counter += 1
@@ -279,7 +266,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
               break
           
 
-    return losses[:counter], w
+    return losses[:counter], best_w
 
 
 print("STARTING TRAINING LOOP")

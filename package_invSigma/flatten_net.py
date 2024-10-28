@@ -61,11 +61,15 @@ class custom_MLP(nn.Module):
     x = (x - self.min_x) / (self.max_x - self.min_x)
     #x += 1.0
 
+    # small linear layer for coeffs
+    x = nn.Dense(self.features[-1])(x)
+
     x = self.act(nn.Dense(self.features[0])(x))
     
     for feat in self.features[1:-1]:
       # residual connections
       x = self.act(nn.Dense(feat)(x))
+
+    x = nn.Dense(self.features[-1])(x)
     x = nn.Dense(self.features[-1])(x)
     return x
-
