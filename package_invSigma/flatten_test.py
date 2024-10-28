@@ -115,7 +115,7 @@ model = custom_MLP([hidden_size,
                     n_params],
                   max_x = max_x, #jnp.array([MAX_MU, MAX_VAR]),
                   min_x = min_x, #jnp.array([MIN_MU, MIN_VAR]))
-                  act = nn.tanh # new default activation
+                  act = nn.softplus # new default activation
 )
 
 num = 10000
