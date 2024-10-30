@@ -28,6 +28,7 @@ def load_config(config_name, config_path="./"):
 config = load_config('test_config.yaml')
 
 n_d = config["n_d"]
+n_params = config["n_params"]
 input_shape = (n_d,)
 
 MAX_VAR = config["MAX_VAR"]
@@ -111,6 +112,9 @@ data_test = data_scaler.transform(data_test.reshape(-1, n_d)).reshape(data_test.
 #data /= datascale
 #data_test /= datascale
 
+print("data_test", data_test.shape)
+print("theta_test", theta_test.shape)
+
 
 
 if SCALE_THETA:
@@ -157,7 +161,7 @@ models = [nn.Sequential([
             MLP(n_hiddens[i], 
                 act=acts[i]),
             Fishnet_from_embedding(
-                          n_p = 2,
+                          n_p = n_params,
                           act=acts[i],
                           hidden=256
             )]
@@ -174,7 +178,11 @@ patience = 200
 epochs = 4000
 key = jr.PRNGKey(999)
 
-def training_loop(key, model, w, data, theta, patience=patience,
+def training_loop(key, model, w, data, 
+                    theta, 
+                    data_val,
+                    theta_val,
+                    patience=patience,
                     epochs=epochs, min_epochs=400):
 
     @jax.jit
@@ -215,6 +223,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
 
     
     losses = jnp.zeros(epochs)
+    val_losses = jnp.zeros(epochs)
 
     loss_val = 0.
     n_train = 10000
@@ -237,7 +246,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
           # shuffle data every epoch
           randidx = jr.permutation(key, jnp.arange(theta.reshape(-1, 2).shape[0]), independent=True)
           _data = data.reshape(-1, n_d, 1)[randidx].reshape(batch_size, -1, n_d)
-          _theta = theta.reshape(-1, 2)[randidx].reshape(batch_size, -1, 2)
+          _theta = theta.reshape(-1, 2)[randidx].reshape(batch_size, -1, n_params)
 
           inits = (w, loss_val, opt_state, _data, _theta)
 
@@ -245,7 +254,17 @@ def training_loop(key, model, w, data, theta, patience=patience,
           loss_val /= _data.shape[0] # average over all batches
 
           losses = losses.at[j].set(loss_val)
-          pbar.set_description('epoch %d loss: %.5f'%(j, loss_val))
+
+
+            # pass over validation data
+          val_loss, _ = loss_grad_fn(w, data_val, \
+                                    theta_val)
+
+          val_losses = val_losses.at[j].set(val_loss)
+
+
+          pbar.set_description('epoch %d loss: %.5f, val_loss: %.5f'%(j, loss_val, val_loss))
+
 
           # use last 10 epochs as running average
           #if j+1 > 10:
@@ -254,8 +273,8 @@ def training_loop(key, model, w, data, theta, patience=patience,
           counter += 1
 
           # patience criterion
-          if loss_val < best_loss:
-              best_loss = loss_val
+          if val_loss < best_loss:
+              best_loss = val_loss
               best_w = w
 
           else:
@@ -266,7 +285,7 @@ def training_loop(key, model, w, data, theta, patience=patience,
               break
           
 
-    return losses[:counter], best_w
+    return losses[:counter], val_losses[:counter], best_w
 
 
 print("STARTING TRAINING LOOP")
@@ -278,8 +297,10 @@ keys = jr.split(key, num_models)
 
 for i,w in enumerate(ws):
   print("\n training model %d of %d \n"%(i+1, num_models))
-  loss, wtrained = training_loop(keys[i], models[i], w, data, theta)
-  all_losses.append(loss)
+  loss, val_loss, wtrained = training_loop(keys[i], models[i], w, data, theta, 
+                                data_test.squeeze(), 
+                                theta_test.squeeze())
+  all_losses.append(val_loss)
   ws[i] = wtrained
 
 ensemble_weights = jnp.array([1./jnp.exp(all_losses[i][-1]) for i in range(num_models)])

@@ -134,6 +134,10 @@ def get_α(λ=10., ϵ=0.1):
 def l1_reg(x, alpha=0.01):
     return alpha * (jnp.abs(x)).mean()
 
+@jax.jit # 0.01
+def l2_reg(x, alpha=0.01):
+    return alpha * norm(x).mean()
+
     
 @jax.jit
 def info_loss(w, theta_batched, F_batched):
@@ -151,9 +155,12 @@ def info_loss(w, theta_batched, F_batched):
         
         # add L1 regularization for jacobian
         loss += l1_reg(J_eta.reshape(-1))
+
         # hack from Tom to improve Frob norm flattening
         r =  λ * loss / (loss + jnp.exp(-1.0*α*loss))
         loss *= r
+
+
 
         return loss, jnp.linalg.det(Q)
     
@@ -165,14 +172,14 @@ def info_loss(w, theta_batched, F_batched):
 
 # TRAINING LOOP STUFF
 
-
+learning_rate = 5e-6
 batch_size = 250
 epochs = 5500
 min_epochs = 1000
 patience = 1000
 w = model.init(key, jnp.ones((n_params,)))
 
-noise = 1e-7
+noise = 1e-7 # 
 theta_true = θs.reshape(-1, batch_size, n_params)
 F_fishnets = Fs.reshape(-1, batch_size, n_params, n_params)
 
@@ -284,7 +291,7 @@ def training_loop(key, w,
 # RUN LOOP
 print("TRAINING FLATTENER NET")
 key,rng = jr.split(key)
-w, all_loss, all_dets = training_loop(key, w, theta_true, F_fishnets, lr=1e-5)
+w, all_loss, all_dets = training_loop(key, w, theta_true, F_fishnets, lr=learning_rate)
 
 
 
@@ -409,6 +416,6 @@ plt.ylabel('$1/\Sigma$')
 plt.xlabel('$\mu$')
 plt.title(r'$ \eta_2$')
 plt.legend(framealpha=0., loc='lower left')
-
+plt.tight_layout()
 plt.savefig("coordinate_visualisation.png")
 

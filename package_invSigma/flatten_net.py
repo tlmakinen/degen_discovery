@@ -59,7 +59,7 @@ class custom_MLP(nn.Module):
     
     # first adjust min-max
     x = (x - self.min_x) / (self.max_x - self.min_x)
-    #x += 1.0
+    x += 1.0
 
     # small linear layer for coeffs
     x = nn.Dense(self.features[-1])(x)
@@ -70,6 +70,9 @@ class custom_MLP(nn.Module):
       # residual connections
       x = self.act(nn.Dense(feat)(x))
 
+    # linear layers to account for rotations
+    x = nn.Dense(self.features[-1])(x)
+    x = nn.Dense(self.features[-1])(x)
     x = nn.Dense(self.features[-1])(x)
     x = nn.Dense(self.features[-1])(x)
     return x
