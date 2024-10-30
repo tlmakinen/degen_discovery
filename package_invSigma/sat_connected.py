@@ -285,25 +285,30 @@ def training_loop(key, model, w, data,
               break
           
 
-    return losses[:counter], val_losses[:counter], best_w
+    return losses[:counter], val_losses[:counter], best_loss, best_w
 
 
 print("STARTING TRAINING LOOP")
 
 all_losses = []
+all_val_losses = []
+best_val_losses = []
 trained_weights = []
 
 keys = jr.split(key, num_models)
 
 for i,w in enumerate(ws):
   print("\n training model %d of %d \n"%(i+1, num_models))
-  loss, val_loss, wtrained = training_loop(keys[i], models[i], w, data, theta, 
+  loss, val_loss, best_val_loss, wtrained = training_loop(keys[i], models[i], w, data, theta, 
                                 data_test.squeeze(), 
                                 theta_test.squeeze())
-  all_losses.append(val_loss)
+  all_losses.append(loss)
+  all_val_losses.append(val_loss)
+  best_val_losses.append(best_val_loss)
   ws[i] = wtrained
 
-ensemble_weights = jnp.array([1./jnp.exp(all_losses[i][-1]) for i in range(num_models)])
+# EDIT: TAKE THE BEST VALIDATION LOSS BEFORE EARLY STOPPING FOR ENSEMBLE WEIGHTS
+ensemble_weights = jnp.array([1./jnp.exp(best_val_losses[i]) for i in range(num_models)])
 print("ensemble weights", ensemble_weights)
 
 
