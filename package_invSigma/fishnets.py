@@ -30,6 +30,20 @@ def smooth_leaky(x: Array) -> Array:
   """
   return jnp.where(x < -1, x, jnp.where((x < 1), ((-(jnp.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x))
 
+def safe_for_grad_log(x):
+  return jnp.log(jnp.where(x > 0., x, 1.))
+
+@jax.jit
+def shifted_softplus(x: Array) -> Array:
+  r"""shifted softplus activation function.
+  Computes the element-wise function:
+  .. math::
+    \mathrm{shifted\_softplus}(x) = \ln(0.5 + 0.5\exp(x))
+    \end{cases}
+  Args:
+    x : input array
+  """
+  return safe_for_grad_log(0.5 + 0.5*jnp.exp(x))
 
 
 # drop-in replacement for tfp's fill_triangular function to remove substrates dependency
