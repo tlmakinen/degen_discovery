@@ -146,10 +146,14 @@ def fit_flattening(F_network_ensemble, θs,
                    lr_schedule_initial: float = 7e-5,
                    lr_decay: float = 0.3,
                    lr_finetune: float = 4e-6,
+                   l1_alpha: float = 0.0,
                    noise: float = 1e-6,
                    seed: int = 0,
                    output_prefix: str = "flattened_coords_sr",
                    SCALE_THETA: bool = False,
+                   do_average: bool = True,
+                   F_avg: Any = None,
+                   norm_factor: float = 1.0,
                    do_plot: bool = True):
     """
     Fits a flattening network to learn a mapping η = f(θ;w), based on matching 
@@ -162,11 +166,15 @@ def fit_flattening(F_network_ensemble, θs,
 
     key = jr.PRNGKey(seed)
 
-    # Compute weighted average of network Fisher matrices:
-    F_fishnets = jnp.average(F_network_ensemble, axis=0, weights=ensemble_weights)
+    if F_avg is None:
+      print("AVERAGING FISHERS")
+      # Compute weighted average of network Fisher matrices:
+      F_fishnets = jnp.average(F_network_ensemble, axis=0, weights=ensemble_weights)
+    else:
+      F_fishnets = F_avg
 
     # Normalize F_fishnets using its maximum value (as in the original code)
-    norm_factor = 1.0 # F_fishnets.max() / 100.
+    # norm_factor = 1.0 # F_fishnets.max() / 100.
     print('norm factor', norm_factor)
     F_fishnets = F_fishnets / norm_factor
 
@@ -193,7 +201,7 @@ def fit_flattening(F_network_ensemble, θs,
         return -jnp.log(ϵ*(λ - 1.) + ϵ**2. / (1. + ϵ)) / ϵ
 
     @jax.jit
-    def l1_reg(x, alpha=0.001):
+    def l1_reg(x, alpha=l1_alpha):
         return alpha * jnp.abs(x).mean()
 
     theta_star = jnp.array([1.0, 1.0])
@@ -206,17 +214,26 @@ def fit_flattening(F_network_ensemble, θs,
 
         def fn(theta, F):
             mymodel = lambda d: model.apply(w, d)
+
+
             J_eta = jax.jacrev(mymodel)(theta).squeeze()
             Jeta_inv = jnp.linalg.pinv(J_eta)
-            Q = Jeta_inv @ F @ Jeta_inv.T
+            Q = Jeta_inv.T @ F @ Jeta_inv # <--- FLIP TRANSPOSE ??
 
             loss = norm(Q - jnp.eye(n_params)) + norm(jnp.linalg.inv(Q) - jnp.eye(n_params))
             r = λ * loss / (loss + jnp.exp(-α * loss))
             loss *= r
-            return loss, jnp.linalg.det(Q)
+            
+            l1_loss = l1_reg(J_eta)
 
-        loss, Q = jax.vmap(fn)(theta_batched, F_batched)
-        return jnp.log(jnp.mean(loss)), jnp.mean(Q)
+            # add in cosine similarity loss to point along PCA of F
+            #y_star = mymodel(theta_star)
+            #cos_loss = 0 #optax.losses.cosine_similarity(y_star, theta_evalue, epsilon=1e-4)
+
+            return loss, jnp.linalg.det(Q), l1_loss
+
+        loss, Q, l1_loss = jax.vmap(fn)(theta_batched, F_batched)
+        return jnp.log(jnp.mean(loss)) + l1_loss.mean(), jnp.mean(Q)
 
     # ---------------------- PREPARE TRAINING DATA -----------------------
     # Expect θs and F_fishnets to be 2D or higher; here we reshape them in batch format.
@@ -330,7 +347,6 @@ def fit_flattening(F_network_ensemble, θs,
     theta_true = θs.reshape(-1, batch_size, n_params)
     F_fishnets_ensemble = [f.reshape(-1, batch_size, n_params, n_params) for f in F_ensemble]
 
-    
     print("FINE-TUNING EACH ENSEMBLE MEMBER")
     ensemble_ws = []
     init_anew = False
@@ -343,11 +359,12 @@ def fit_flattening(F_network_ensemble, θs,
         else:
             _w = w
         _w, all_loss, all_dets = training_loop(key, _w, theta_true, f, 
-                                               lr=lr_finetune,
-                                               epochs=finetune_epochs,
-                                               patience=20,
-                                               opt_type=optax.adam)
+                                            lr=lr_finetune,
+                                            epochs=finetune_epochs,
+                                            patience=20,
+                                            opt_type=optax.adam)
         ensemble_ws.append(_w)
+
 
     # ---------------------- EVALUATION: GET JACOBIANS & ENSEMBLE OUTPUTS -----------------------
     @jax.jit
@@ -366,7 +383,7 @@ def fit_flattening(F_network_ensemble, θs,
         getjac = lambda d: get_jacobian(d, w=_w)
         η_ensemble.append(ηs)
         Jbar_ensemble.append(jnp.concatenate(jnp.array([jax.vmap(getjac)(t) 
-                                                         for t in θs.reshape(-1, batch_size, n_params)])))
+                                                        for t in θs.reshape(-1, batch_size, n_params)])))
     
     # Compute Jacobians of the current flattening network.
     ηs = jax.vmap(mymodel)(θs)
@@ -501,7 +518,7 @@ if __name__ == '__main__':
     #fake_F = jnp.tile(jnp.eye(2), (fake_theta.shape[0], 1, 1))
 
     # ---------------------- LOAD DATA FROM FILE -----------------------
-    fname = "fishnets_outputs"
+    fname = "fishnets-log/fishnets_outputs"
     fname_full = fname + ".npz"
     data_npz = np.load(fname_full)
     thetas = jnp.array(data_npz["theta"])

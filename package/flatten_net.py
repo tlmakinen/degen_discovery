@@ -16,6 +16,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 
+
 # custom activation function
 @jax.jit
 def smooth_leaky(x: Array) -> Array:
@@ -59,13 +60,72 @@ class custom_MLP(nn.Module):
     
     # first adjust min-max
     x = (x - self.min_x) / (self.max_x - self.min_x)
-    #x += 1.0
+    x += 1.0
+
+    # small linear layer for coeffs
+    x = nn.Dense(self.features[-1])(x)
 
     x = self.act(nn.Dense(self.features[0])(x))
     
     for feat in self.features[1:-1]:
       # residual connections
       x = self.act(nn.Dense(feat)(x))
+
+    # linear layers to account for rotations
+    x = nn.Dense(self.features[-1])(x)
+    x = nn.Dense(self.features[-1])(x)
+    x = nn.Dense(self.features[-1])(x)
     x = nn.Dense(self.features[-1])(x)
     return x
 
+
+
+
+def kabsch(P: Array, Q: Array) -> Array:
+    """
+    For calculating how to rotated P onto Q.
+
+    adapted from https://github.com/charnley/rmsd/
+
+    Using the Kabsch algorithm with two sets of paired point P and Q, centered
+    around the centroid. Each vector set is represented as an NxD
+    matrix, where D is the the dimension of the space.
+    The algorithm works in three steps:
+    - a centroid translation of P and Q (assumed done before this function
+      call)
+    - the computation of a covariance matrix C
+    - computation of the optimal rotation matrix U
+    For more info see http://en.wikipedia.org/wiki/Kabsch_algorithm
+    Parameters
+    ----------
+    P : array
+        (N,D) matrix, where N is points and D is dimension.
+    Q : array
+        (N,D) matrix, where N is points and D is dimension.
+    Returns
+    -------
+    U : matrix
+        Rotation matrix (D,D)
+    """
+
+    # Computation of the covariance matrix
+    C = jnp.dot(jnp.transpose(P), Q)
+
+    # Computation of the optimal rotation matrix
+    # This can be done using singular value decomposition (SVD)
+    # Getting the sign of the det(V)*(W) to decide
+    # whether we need to correct our rotation matrix to ensure a
+    # right-handed coordinate system.
+    # And finally calculating the optimal rotation matrix U
+    # see http://en.wikipedia.org/wiki/Kabsch_algorithm
+    V, S, W = jnp.linalg.svd(C)
+    d = (jnp.linalg.det(V) * jnp.linalg.det(W)) < 0.0
+
+    if d:
+        S = S.at[-1].set(-S[-1])
+        V = V.at[:, -1].set(-V[:, -1])
+
+    # Create Rotation matrix U
+    U = jnp.dot(V, W)
+
+    return U
